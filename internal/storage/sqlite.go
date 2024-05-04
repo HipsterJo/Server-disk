@@ -2,8 +2,10 @@ package storage
 
 import (
 	"database/sql"
+	"disk-server/internal/lib/api/response"
 	entities "disk-server/internal/lib/entities"
 	"fmt"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -39,7 +41,6 @@ func CreateUser(u entities.User, s *Storage) error {
 func GetAllUsers(s *Storage) ([]entities.User, error) {
 	const op = "storage.postgres.GetAllUsers"
 
-	// Выполняем SQL-запрос для выборки всех пользователей
 	rows, err := s.db.Query("SELECT username, password, email FROM users")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -65,7 +66,7 @@ func GetAllUsers(s *Storage) ([]entities.User, error) {
 	return users, nil
 }
 
-func GetUserByUserName(s *Storage, username string) (entities.User, error) {
+func GetUserByUserName(s *Storage, username string) (entities.User, response.Response) {
 	const op = "storage.postgres.GetUserByUserName"
 
 	var user entities.User
@@ -76,11 +77,55 @@ func GetUserByUserName(s *Storage, username string) (entities.User, error) {
 
 	err := row.Scan(&user.Username, &user.Password, &user.Email)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return entities.User{}, fmt.Errorf("%s: user not found", op)
-		}
-		return entities.User{}, fmt.Errorf("%s: %w", op, err)
+		return entities.User{}, response.Error("Пользователь не найден!")
 	}
 
-	return user, nil
+	return user, response.OK()
+}
+
+func NewFile(s *Storage, username string, file entities.FileData) (entities.File, response.Response) {
+	const op = "storage.postger.NewFile"
+
+	row := s.db.QueryRow(`
+		SELECT id FROM users WHERE username = $1
+	`, username)
+	var user_id int
+
+	err := row.Scan(&user_id)
+	if err != nil {
+		return entities.File{}, response.Error("Пользователь не найден!")
+	}
+
+	stmt, err := s.db.Prepare(`
+		INSERT INTO files (user_id, filename, size, mime_type , path)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, uploaded_at, updated_at
+	`)
+	if err != nil {
+		fmt.Println(err)
+		return entities.File{}, response.Error(fmt.Sprintf("%s: %s", op, err.Error()))
+	}
+	defer stmt.Close()
+
+	var fileID string
+	var uploaded_at time.Time
+	var updated_at time.Time
+
+	err = stmt.QueryRow(user_id, file.FileName, file.Size, file.Mime_type, file.Path).Scan(&fileID, &uploaded_at, &updated_at)
+	if err != nil {
+		return entities.File{}, response.Error(fmt.Sprintf("%s: %s", op, err.Error()))
+	}
+
+	newFile := entities.File{
+		User_id:    user_id,
+		Id:         fileID,
+		FileName:   file.FileName,
+		Size:       file.Size,
+		Mime_type:  file.Mime_type,
+		Path:       file.Path,
+		Updated_at: updated_at,
+		Upload_at:  uploaded_at,
+	}
+
+	return newFile, response.OKWithData(newFile)
 }

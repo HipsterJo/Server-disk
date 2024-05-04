@@ -2,9 +2,15 @@ package save
 
 import (
 	"disk-server/internal/config"
+	"disk-server/internal/lib/api/response"
+	createfiles "disk-server/internal/lib/createFiles"
+	"disk-server/internal/lib/entities"
+	jwt_token "disk-server/internal/lib/jwt"
+	"disk-server/internal/storage"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 )
@@ -13,17 +19,7 @@ type FileSaver interface {
 	SaveFile()
 }
 
-func ensureDirExists(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.MkdirAll(path, os.ModePerm)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func New(log *slog.Logger, cfg *config.Config) http.HandlerFunc {
+func New(log *slog.Logger, cfg *config.Config, s *storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const op = "handlers.files.New"
 
@@ -31,6 +27,19 @@ func New(log *slog.Logger, cfg *config.Config) http.HandlerFunc {
 
 		file, handler, err := r.FormFile("file")
 		path := r.FormValue("path")
+		size := handler.Size
+		mime_type := handler.Header.Values("Content-type")
+		contentDisposition := handler.Header.Get("Content-Disposition")
+		_, params, err := mime.ParseMediaType(contentDisposition)
+		if err != nil {
+
+		}
+
+		filename := params["filename"]
+		if filename == "" {
+			response.SendJSONResponse(w, 403, response.Error("Нет файла"))
+		}
+
 		if err != nil {
 			log.Error("Ошибка получения файла", err)
 			return
@@ -38,14 +47,28 @@ func New(log *slog.Logger, cfg *config.Config) http.HandlerFunc {
 
 		defer file.Close()
 
-		// Ensure directory exists
-		if err := ensureDirExists(cfg.Upload_path + path); err != nil {
-			log.Error("Ошибка создания папки", err)
-			http.Error(w, "Ошибка при создании папки", http.StatusInternalServerError)
-			return
+		uniqueName := createfiles.GenerateUniqueFilename()
+
+		newFileData := entities.FileData{
+			FileName:  filename,
+			Size:      int(size),
+			Mime_type: mime_type[0],
+			Path:      uniqueName,
 		}
 
-		f, err := os.Create(cfg.Upload_path + path + handler.Filename)
+		userData, res := jwt_token.GetJsonJwt(r)
+		if res.Error != "" {
+			response.SendJSONResponse(w, 405, res)
+		}
+
+		storage.NewFile(s, userData.Username, newFileData)
+
+		f, err := os.Create(cfg.Upload_path + path + uniqueName)
+
+		if err != nil {
+			http.Error(w, "Ошибка при создании файла", http.StatusInternalServerError)
+			return
+		}
 
 		if err != nil {
 			http.Error(w, "Ошибка при создании файла", http.StatusInternalServerError)

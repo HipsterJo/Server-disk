@@ -11,8 +11,8 @@ import (
 )
 
 func Login(log *slog.Logger, cfg *config.Config, user login_dto.LoginDto, db *storage.Storage) response.Response {
-	u, err := storage.GetUserByUserName(db, user.Username)
-	if err != nil {
+	u, resp := storage.GetUserByUserName(db, user.Username)
+	if resp.Error != "" {
 		log.Error("Wrong data")
 		return response.Error("Wrong data")
 	}

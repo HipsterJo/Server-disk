@@ -1,9 +1,12 @@
 package jwt_token
 
 import (
+	"disk-server/internal/lib/api/response"
 	"disk-server/internal/lib/entities"
 	"fmt"
 	"log"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -55,13 +58,20 @@ func CheckJwt(jwtToken string) bool {
 	return false
 }
 
-func GetJsonJwt(jwtToken string) (UserData, error) {
+func GetJsonJwt(r *http.Request) (UserData, response.Response) {
+	authHeader := r.Header.Get("Authorization")
 
-	token, err := jwt.Parse(jwtToken, func(token *jwt.Token) (interface{}, error) {
+	authParts := strings.Split(authHeader, " ")
+	if len(authParts) != 2 || authParts[0] != "Bearer" {
+		return UserData{}, response.Error("Ошибка авторизации")
+	}
+	tokenString := authParts[1]
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return secret_key, nil
 	})
 	if err != nil || !token.Valid {
-		return UserData{}, fmt.Errorf("неверный токен")
+		return UserData{}, response.Error("Ошибка авторизации")
 	}
 
 	claims := token.Claims.(jwt.MapClaims)
@@ -71,5 +81,5 @@ func GetJsonJwt(jwtToken string) (UserData, error) {
 	userData.Username = claims["username"].(string)
 	userData.Email = claims["email"].(string)
 
-	return userData, nil
+	return userData, response.OK()
 }
