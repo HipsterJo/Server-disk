@@ -21,21 +21,21 @@ const (
 )
 
 type File struct {
-	User_id    int       `json: "user_id"`
-	Id         string    `json:"id"`
-	FileName   string    `json: "filename"`
-	Size       int       `json: "size`
-	Mime_type  string    `json: "mime_type"`
-	Upload_at  time.Time `json: "uploaded_at"`
-	Updated_at time.Time `json: "updated_at"`
-	Path       string    `json:"path"`
+	UserId    int       `json: "user_id"`
+	Id        string    `json:"id"`
+	FileName  string    `json: "filename"`
+	Size      int       `json: "size`
+	MimeType  string    `json: "mime_type"`
+	UploadAt  time.Time `json: "uploaded_at"`
+	UpdatedAt time.Time `json: "updated_at"`
+	Path      string    `json:"path"`
 }
 
 type FileData struct {
-	FileName  string `json: "filename"`
-	Size      int    `json: "size`
-	Mime_type string `json: "mime_type"`
-	Path      string `json:"path"`
+	FileName string `json: "filename"`
+	Size     int    `json: "size`
+	MimeType string `json: "mime_type"`
+	Path     string `json:"path"`
 }
 
 type FileQueryParams struct {
@@ -47,4 +47,11 @@ type FileQueryParams struct {
 	SortDir   EnumDir
 	StartDate time.Time
 	EndDate   time.Time
+}
+
+type Folder struct {
+	Id             int
+	Name           string
+	ParentFolderId int
+	UserId         int
 }

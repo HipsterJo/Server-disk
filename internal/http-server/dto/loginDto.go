@@ -1,4 +1,4 @@
-package login_dto
+package dto
 
 type LoginDto struct {
 	Username string `json:"username"`

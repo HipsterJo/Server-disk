@@ -24,6 +24,8 @@ func GetUserFiles(log *slog.Logger, cfg *config.Config, db *storage.Storage) htt
 		}
 
 		params := storage.InitialFilter(r)
-		storage.GetUserFiles(db, user, params, r)
+		files, resp := storage.GetUserFiles(db, user, params, r)
+
+		response.SendJSONResponse(w, 200, response.OKWithData(files))
 	}
 }

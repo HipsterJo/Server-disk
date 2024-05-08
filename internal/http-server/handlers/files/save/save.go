@@ -50,10 +50,10 @@ func New(log *slog.Logger, cfg *config.Config, s *storage.Storage) http.HandlerF
 		uniqueName := createfiles.GenerateUniqueFilename()
 
 		newFileData := entities.FileData{
-			FileName:  filename,
-			Size:      int(size),
-			Mime_type: mime_type[0],
-			Path:      uniqueName,
+			FileName: filename,
+			Size:     int(size),
+			MimeType: mime_type[0],
+			Path:     uniqueName,
 		}
 
 		userData, res := jwt_token.GetJsonJwt(r)

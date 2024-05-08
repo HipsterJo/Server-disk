@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"disk-server/internal/http-server/dto"
 	"disk-server/internal/lib/api/response"
 	entities "disk-server/internal/lib/entities"
 	"fmt"
@@ -113,25 +114,26 @@ func NewFile(s *Storage, username string, file entities.FileData) (entities.File
 	var uploaded_at time.Time
 	var updated_at time.Time
 
-	err = stmt.QueryRow(user_id, file.FileName, file.Size, file.Mime_type, file.Path).Scan(&fileID, &uploaded_at, &updated_at)
+	err = stmt.QueryRow(user_id, file.FileName, file.Size, file.MimeType, file.Path).Scan(&fileID, &uploaded_at, &updated_at)
 	if err != nil {
 		return entities.File{}, response.Error(fmt.Sprintf("%s: %s", op, err.Error()))
 	}
 
 	newFile := entities.File{
-		User_id:    user_id,
-		Id:         fileID,
-		FileName:   file.FileName,
-		Size:       file.Size,
-		Mime_type:  file.Mime_type,
-		Path:       file.Path,
-		Updated_at: updated_at,
-		Upload_at:  uploaded_at,
+		UserId:    user_id,
+		Id:        fileID,
+		FileName:  file.FileName,
+		Size:      file.Size,
+		MimeType:  file.MimeType,
+		Path:      file.Path,
+		UpdatedAt: updated_at,
+		UploadAt:  uploaded_at,
 	}
 
 	return newFile, response.OKWithData(newFile)
 }
 
+// Вынести в отдельный файл!!!!
 func InitialFilter(r *http.Request) entities.FileQueryParams {
 	var queryParams entities.FileQueryParams
 	queryParams.Search = r.URL.Query().Get("search")
@@ -155,9 +157,10 @@ func InitialFilter(r *http.Request) entities.FileQueryParams {
 	return queryParams
 }
 
+// Надо отправлять файлы "с рабочего пространства" и массив с папками? Или сделать отдельный рут initialFiles?
 func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQueryParams, r *http.Request) ([]entities.File, response.Response) {
 	sqlQuery := fmt.Sprintf(`
-        SELECT filename, size, mime_type, uploaded_at, updated_at, path
+        SELECT id, filename, size, mime_type, uploaded_at, updated_at, path
         FROM files
         WHERE user_id='%d'
     `, user.Id)
@@ -207,7 +210,7 @@ func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQ
 	var files []entities.File
 	for rows.Next() {
 		var file entities.File
-		if err := rows.Scan(&file.FileName, &file.Size, &file.Mime_type, &file.Upload_at, &file.Updated_at, &file.Path); err != nil {
+		if err := rows.Scan(&file.Id, &file.FileName, &file.Size, &file.MimeType, &file.UploadAt, &file.UpdatedAt, &file.Path); err != nil {
 			log.Println("Failed to scan row:", err)
 			return nil, response.Error("Failed to fetch files")
 		}
@@ -220,4 +223,31 @@ func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQ
 
 	fmt.Println(files)
 	return files, response.OKWithData(files)
+}
+
+//Вынести в отдельный файл!!!!
+// Folder
+
+func CreateFolder(db *Storage, folderDto dto.CreateFolder, user entities.UserDocument) (entities.Folder, response.Response) {
+	sqlQuery := `
+		INSERT INTO folders ( name, parent_folder_id, user_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, name, parent_folder_id, user_id
+	`
+
+	row := db.db.QueryRow(sqlQuery, folderDto.Name, user.Id)
+
+	var folder entities.Folder
+
+	err := row.Scan(&folder.Id, &folder.Name, &folder.ParentFolderId, &folder.UserId)
+	if err != nil {
+		return entities.Folder{}, response.Error(fmt.Sprintf("Failed to create folder: %v", err))
+	}
+
+	return folder, response.OKWithData(folder)
+}
+
+func AddFileToFolder() {
+	//Проверка, что folder существует
+	//Изменение folder_id  у файла
 }
