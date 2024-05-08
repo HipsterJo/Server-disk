@@ -13,7 +13,6 @@ import (
 func Login(log *slog.Logger, cfg *config.Config, user login_dto.LoginDto, db *storage.Storage) response.Response {
 	u, resp := storage.GetUserByUserName(db, user.Username)
 	if resp.Error != "" {
-		log.Error("Wrong data")
 		return response.Error("Wrong data")
 	}
 
@@ -24,7 +23,7 @@ func Login(log *slog.Logger, cfg *config.Config, user login_dto.LoginDto, db *st
 		return response.Error("Wrong data")
 	}
 
-	validToken, err := jwt_token.GenreateJWT(u)
+	validToken, err := jwt_token.GenreateJWT(u.User)
 
 	if err != nil {
 		return response.Error("Wrong data")

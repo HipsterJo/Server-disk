@@ -9,6 +9,7 @@ import (
 	"disk-server/internal/config"
 
 	controller_auth "disk-server/internal/http-server/controllers/auth"
+	controller_files "disk-server/internal/http-server/controllers/files"
 	"disk-server/internal/http-server/handlers/files/save"
 	checkAuthMiddleware "disk-server/internal/http-server/middleware/checkAuth"
 	"disk-server/internal/storage"
@@ -43,10 +44,12 @@ func main() {
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "HELLO11")
 	})
+
+	router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(cfg.Upload_path))))
 	router.Post("/register", controller_auth.Register(log, cfg, storage))
 	router.Post("/login", controller_auth.Login(log, cfg, storage))
 	router.Post("/upload", checkAuthMiddleware.CheckAuthMiddleware(save.New(log, cfg, storage)))
-	// router.Get("/files", checkAuthMiddleware.CheckAuthMiddleware(controller_files.GetUserFiles(log, cfg, storage)))
+	router.Get("/files", controller_files.GetUserFiles(log, cfg, storage))
 
 	http.ListenAndServe(":8080", router)
 }

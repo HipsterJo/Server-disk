@@ -5,7 +5,11 @@ import (
 	"disk-server/internal/lib/api/response"
 	entities "disk-server/internal/lib/entities"
 	"fmt"
+	"log"
+	"net/http"
 	"time"
+
+	"disk-server/internal/lib/conversion"
 
 	_ "github.com/lib/pq"
 )
@@ -66,18 +70,16 @@ func GetAllUsers(s *Storage) ([]entities.User, error) {
 	return users, nil
 }
 
-func GetUserByUserName(s *Storage, username string) (entities.User, response.Response) {
+func GetUserByUserName(s *Storage, username string) (entities.UserDocument, response.Response) {
 	const op = "storage.postgres.GetUserByUserName"
 
-	var user entities.User
+	var user entities.UserDocument
 
-	row := s.db.QueryRow(`
-        SELECT username, password, email FROM users WHERE username = $1
-    `, username)
+	row := s.db.QueryRow(`SELECT id, username, password, email FROM users WHERE username = $1`, username)
 
-	err := row.Scan(&user.Username, &user.Password, &user.Email)
+	err := row.Scan(&user.Id, &user.Username, &user.Password, &user.Email)
 	if err != nil {
-		return entities.User{}, response.Error("Пользователь не найден!")
+		return entities.UserDocument{}, response.Error("Пользователь не найден!")
 	}
 
 	return user, response.OK()
@@ -128,4 +130,94 @@ func NewFile(s *Storage, username string, file entities.FileData) (entities.File
 	}
 
 	return newFile, response.OKWithData(newFile)
+}
+
+func InitialFilter(r *http.Request) entities.FileQueryParams {
+	var queryParams entities.FileQueryParams
+	queryParams.Search = r.URL.Query().Get("search")
+	minSizeStr := r.URL.Query().Get("minsize")
+	maxSizeStr := r.URL.Query().Get("maxsize")
+	queryParams.MimeType = r.URL.Query().Get("MimeType")
+
+	queryParams.MinSize = conversion.StringToInt(minSizeStr, -1)
+	queryParams.MaxSize = conversion.StringToInt(maxSizeStr, -1)
+
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+	startDate, err := time.Parse("20060102", startDateStr)
+	endDate, err := time.Parse("20060102", endDateStr)
+	if err != nil {
+	}
+
+	queryParams.StartDate = startDate
+	queryParams.EndDate = endDate
+
+	return queryParams
+}
+
+func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQueryParams, r *http.Request) ([]entities.File, response.Response) {
+	sqlQuery := fmt.Sprintf(`
+        SELECT filename, size, mime_type, uploaded_at, updated_at, path
+        FROM files
+        WHERE user_id='%d'
+    `, user.Id)
+	if params.Search != "" {
+		sqlQuery += fmt.Sprintf(` AND filename LIKE '%%%s%%'`, params.Search)
+	}
+	if params.MinSize > 0 {
+		sqlQuery += fmt.Sprintf(` AND size >= %d`, params.MinSize)
+	}
+	if params.MaxSize > 0 {
+		sqlQuery += fmt.Sprintf(` AND size <= %d`, params.MaxSize)
+	}
+	if params.MimeType != "" {
+		sqlQuery += fmt.Sprintf(` AND mime_type = '%s'`, params.MimeType)
+	}
+	if params.StartDate != (time.Time{}) {
+		sqlQuery += fmt.Sprintf(` AND uploaded_at >= '%s'`, params.StartDate.Format("20060102"))
+	}
+	if params.EndDate != (time.Time{}) {
+		sqlQuery += fmt.Sprintf(` AND updated_at <= '%s'`, params.EndDate.Format("20060102"))
+	}
+
+	switch params.SortBy {
+	case entities.SortByName:
+		sqlQuery += " ORDER BY filename"
+	case entities.SortBySize:
+		sqlQuery += " ORDER BY size"
+	case entities.SortByUpload:
+		sqlQuery += " ORDER BY uploaded_at"
+	case entities.SortByUpdated:
+		sqlQuery += " ORDER BY updated_at"
+	}
+
+	if params.SortDir == entities.SortDesc {
+		sqlQuery += " DESC"
+	}
+
+	fmt.Println(sqlQuery)
+
+	rows, err := db.db.Query(sqlQuery)
+	if err != nil {
+		log.Println("Failed to execute SQL query:", err)
+		return nil, response.Error("Failed to fetch files")
+	}
+	defer rows.Close()
+
+	var files []entities.File
+	for rows.Next() {
+		var file entities.File
+		if err := rows.Scan(&file.FileName, &file.Size, &file.Mime_type, &file.Upload_at, &file.Updated_at, &file.Path); err != nil {
+			log.Println("Failed to scan row:", err)
+			return nil, response.Error("Failed to fetch files")
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		log.Println("Error while iterating over rows:", err)
+		return nil, response.Error("Failed to fetch files")
+	}
+
+	fmt.Println(files)
+	return files, response.OKWithData(files)
 }
