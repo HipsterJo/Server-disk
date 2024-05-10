@@ -137,12 +137,14 @@ func NewFile(s *Storage, username string, file entities.FileData) (entities.File
 func InitialFilter(r *http.Request) entities.FileQueryParams {
 	var queryParams entities.FileQueryParams
 	queryParams.Search = r.URL.Query().Get("search")
-	minSizeStr := r.URL.Query().Get("minsize")
-	maxSizeStr := r.URL.Query().Get("maxsize")
-	queryParams.MimeType = r.URL.Query().Get("MimeType")
+	accessLevelStr := r.URL.Query().Get("access_level")
+	minSizeStr := r.URL.Query().Get("min_size")
+	maxSizeStr := r.URL.Query().Get("max_size")
+	queryParams.MimeType = r.URL.Query().Get("mime_type")
 
 	queryParams.MinSize = conversion.StringToInt(minSizeStr, -1)
 	queryParams.MaxSize = conversion.StringToInt(maxSizeStr, -1)
+	queryParams.AccessLevel = conversion.StringToInt(accessLevelStr, 0)
 
 	startDateStr := r.URL.Query().Get("start_date")
 	endDateStr := r.URL.Query().Get("end_date")
@@ -160,7 +162,7 @@ func InitialFilter(r *http.Request) entities.FileQueryParams {
 // Надо отправлять файлы "с рабочего пространства" и массив с папками? Или сделать отдельный рут initialFiles?
 func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQueryParams, r *http.Request) ([]entities.File, response.Response) {
 	sqlQuery := fmt.Sprintf(`
-        SELECT id, filename, size, mime_type, uploaded_at, updated_at, path
+        SELECT id, filename, size, mime_type, uploaded_at, updated_at, path, access_level
         FROM files
         WHERE user_id='%d'
     `, user.Id)
@@ -210,7 +212,7 @@ func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQ
 	var files []entities.File
 	for rows.Next() {
 		var file entities.File
-		if err := rows.Scan(&file.Id, &file.FileName, &file.Size, &file.MimeType, &file.UploadAt, &file.UpdatedAt, &file.Path); err != nil {
+		if err := rows.Scan(&file.Id, &file.FileName, &file.Size, &file.MimeType, &file.UploadAt, &file.UpdatedAt, &file.Path, &file.AccessLevel); err != nil {
 			log.Println("Failed to scan row:", err)
 			return nil, response.Error("Failed to fetch files")
 		}
@@ -225,29 +227,185 @@ func GetUserFiles(db *Storage, user entities.UserDocument, params entities.FileQ
 	return files, response.OKWithData(files)
 }
 
-//Вынести в отдельный файл!!!!
-// Folder
+func GetHomeDir(db *Storage, user entities.UserDocument, r *http.Request) response.Response {
+	sqlQuery := fmt.Sprintf(`
+        SELECT id, filename, size, mime_type, uploaded_at, updated_at, path, access_level
+        FROM files
+        WHERE user_id='%d' AND folder_id IS NULL
+    `, user.Id)
 
-func CreateFolder(db *Storage, folderDto dto.CreateFolder, user entities.UserDocument) (entities.Folder, response.Response) {
+	rows, err := db.db.Query(sqlQuery)
+	if err != nil {
+		return response.Error("Ошибка получения данных1")
+	}
+	defer rows.Close()
+
+	var files []entities.File
+	for rows.Next() {
+		var file entities.File
+		if err := rows.Scan(&file.Id, &file.FileName, &file.Size, &file.MimeType, &file.UploadAt, &file.UpdatedAt, &file.Path, &file.AccessLevel); err != nil {
+			return response.Error("Ошибка получения данных")
+		}
+		fmt.Println(file)
+		files = append(files, file)
+	}
+
+	if err := rows.Err(); err != nil {
+		return response.Error("Ошибка получения данных")
+	}
+
+	sqlQuery = fmt.Sprintf(`
+        SELECT id, name, user_id
+        FROM folders
+        WHERE user_id='%d' AND parent_folder_id IS NULL
+    `, user.Id)
+
+	rows, err = db.db.Query(sqlQuery)
+	if err != nil {
+		log.Println("Failed to execute SQL query:", err)
+		return response.Error("Ошибка получения данных")
+	}
+	defer rows.Close()
+
+	var folders []entities.Folder
+	for rows.Next() {
+		var folder entities.Folder
+		if err := rows.Scan(&folder.Id, &folder.Name, &folder.UserId); err != nil {
+			log.Println("Failed to scan row:", err)
+			return response.Error("Ошибка получения данных")
+		}
+		folders = append(folders, folder)
+	}
+	if err := rows.Err(); err != nil {
+		log.Println("Error while iterating over rows:", err)
+		return response.Error("Ошибка получения данных")
+	}
+
+	return response.OKWithData(map[string]interface{}{
+		"files":   files,
+		"folders": folders,
+	})
+}
+
+func AddFileToFolder(db *Storage, folder_id int, file_id int, user entities.UserDocument) response.Response {
+
 	sqlQuery := `
-		INSERT INTO folders ( name, parent_folder_id, user_id)
-		VALUES ($1, $2, $3, $4)
+		SELECT id FROM folders WHERE id = $1 AND  user_id = $2
+	`
+
+	err := db.db.QueryRow(sqlQuery, folder_id, user.Id).Scan(&folder_id)
+	if err != nil {
+		log.Println("Failed to check if folder exists:", err)
+		return response.Error("Папка не найдена!")
+	}
+
+	sqlQuery = `
+		UPDATE files
+		SET folder_id = $1
+		WHERE id = $2 AND user_id = $3
+	`
+	_, err = db.db.Exec(sqlQuery, folder_id, file_id, user.Id)
+	if err != nil {
+		return response.Error("Ошибка при добавления файла в папку!")
+	}
+
+	return response.OK()
+
+}
+
+func CreateFolder(db *Storage, folderDto dto.CreateFolder, user entities.UserDocument) response.Response {
+
+	if folderDto.ParentFolderId == 0 {
+		sqlQuery := `
+		INSERT INTO folders (name,  user_id)
+		VALUES ($1, $2 )
+		RETURNING id, name, user_id
+	`
+		row := db.db.QueryRow(sqlQuery, folderDto.Name, user.Id)
+		var folder entities.Folder
+
+		err := row.Scan(&folder.Id, &folder.Name, &folder.UserId)
+		if err != nil {
+			return response.Error(fmt.Sprintf("Failed to create folder: %v", err))
+		}
+
+		return response.OKWithData(folder)
+	}
+
+	sqlQuery := `
+		INSERT INTO folders (name, parent_folder_id, user_id)
+		VALUES ($1, $2, $3)
 		RETURNING id, name, parent_folder_id, user_id
 	`
 
-	row := db.db.QueryRow(sqlQuery, folderDto.Name, user.Id)
+	row := db.db.QueryRow(sqlQuery, folderDto.Name, folderDto.ParentFolderId, user.Id)
 
 	var folder entities.Folder
 
 	err := row.Scan(&folder.Id, &folder.Name, &folder.ParentFolderId, &folder.UserId)
 	if err != nil {
-		return entities.Folder{}, response.Error(fmt.Sprintf("Failed to create folder: %v", err))
+		return response.Error(fmt.Sprintf("Failed to create folder: %v", err))
 	}
 
-	return folder, response.OKWithData(folder)
+	return response.OKWithData(folder)
 }
 
-func AddFileToFolder() {
-	//Проверка, что folder существует
-	//Изменение folder_id  у файла
+func GetFilesFromFolder(db *Storage, user entities.UserDocument, r *http.Request, folder_id int) response.Response {
+	sqlQuery := fmt.Sprintf(`
+        SELECT id, filename, size, mime_type, uploaded_at, updated_at, path, access_level
+        FROM files
+        WHERE user_id='%d' AND folder_id = '%d'
+    `, user.Id, folder_id)
+
+	rows, err := db.db.Query(sqlQuery)
+	if err != nil {
+		return response.Error("Ошибка получения данных")
+	}
+	defer rows.Close()
+
+	var files []entities.File
+	for rows.Next() {
+		var file entities.File
+		if err := rows.Scan(&file.Id, &file.FileName, &file.Size, &file.MimeType, &file.UploadAt, &file.UpdatedAt, &file.Path, &file.AccessLevel); err != nil {
+			return response.Error("Ошибка получения данных")
+		}
+		fmt.Println(file)
+		files = append(files, file)
+	}
+
+	if err := rows.Err(); err != nil {
+		return response.Error("Ошибка получения данных")
+	}
+
+	sqlQuery = fmt.Sprintf(`
+        SELECT id, name, user_id
+        FROM folders
+        WHERE user_id='%d' AND parent_folder_id='%d'
+    `, user.Id, folder_id)
+
+	rows, err = db.db.Query(sqlQuery)
+	if err != nil {
+		log.Println("Failed to execute SQL query:", err)
+		return response.Error("Ошибка получения данных")
+	}
+	defer rows.Close()
+
+	var folders []entities.Folder
+	for rows.Next() {
+		var folder entities.Folder
+		if err := rows.Scan(&folder.Id, &folder.Name, &folder.UserId); err != nil {
+			log.Println("Failed to scan row:", err)
+			return response.Error("Ошибка получения данных")
+		}
+		folders = append(folders, folder)
+	}
+	if err := rows.Err(); err != nil {
+		log.Println("Error while iterating over rows:", err)
+		return response.Error("Ошибка получения данных")
+	}
+
+	return response.OKWithData(map[string]interface{}{
+		"files":   files,
+		"folders": folders,
+	})
 }

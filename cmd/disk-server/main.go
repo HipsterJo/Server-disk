@@ -10,6 +10,7 @@ import (
 
 	controller_auth "disk-server/internal/http-server/controllers/auth"
 	controller_files "disk-server/internal/http-server/controllers/files"
+	controller_folder "disk-server/internal/http-server/controllers/folder"
 	"disk-server/internal/http-server/handlers/files/save"
 	checkAuthMiddleware "disk-server/internal/http-server/middleware/checkAuth"
 	"disk-server/internal/storage"
@@ -49,8 +50,11 @@ func main() {
 	router.Post("/register", controller_auth.Register(log, cfg, storage))
 	router.Post("/login", controller_auth.Login(log, cfg, storage))
 	router.Post("/upload", checkAuthMiddleware.CheckAuthMiddleware(save.New(log, cfg, storage)))
-	router.Get("/files", controller_files.GetUserFiles(log, cfg, storage))
-
+	router.Get("/files", checkAuthMiddleware.CheckAuthMiddleware(controller_files.GetUserFiles(log, cfg, storage)))
+	router.Get("/home", checkAuthMiddleware.CheckAuthMiddleware(controller_files.GetHomeDir(log, cfg, storage)))
+	router.Post("/folder", checkAuthMiddleware.CheckAuthMiddleware(controller_folder.CreateFolder(log, cfg, storage)))
+	router.Get("/folder/{id}", checkAuthMiddleware.CheckAuthMiddleware(controller_folder.GetFolder(log, cfg, storage)))
+	router.Post("/addFileToFolder", checkAuthMiddleware.CheckAuthMiddleware(controller_files.AddFileToFolder(log, cfg, storage)))
 	http.ListenAndServe(":8080", router)
 }
 

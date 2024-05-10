@@ -7,6 +7,7 @@ import (
 	"disk-server/internal/lib/entities"
 	jwt_token "disk-server/internal/lib/jwt"
 	"disk-server/internal/storage"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ type FileSaver interface {
 	SaveFile()
 }
 
+// Разобораться с return, поч ничего не возращают
 func New(log *slog.Logger, cfg *config.Config, s *storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const op = "handlers.files.New"
@@ -48,12 +50,28 @@ func New(log *slog.Logger, cfg *config.Config, s *storage.Storage) http.HandlerF
 		defer file.Close()
 
 		uniqueName := createfiles.GenerateUniqueFilename()
+		//
+		var folder_id int
+		var access_level int
 
+		if r.Body == nil {
+			folder_id = 0
+			access_level = 0
+		}
+
+		err = json.NewDecoder(r.Body).Decode(&folder_id)
+		if err != nil {
+			folder_id = 0
+		}
+
+		//
 		newFileData := entities.FileData{
-			FileName: filename,
-			Size:     int(size),
-			MimeType: mime_type[0],
-			Path:     uniqueName,
+			FileName:    filename,
+			Size:        int(size),
+			MimeType:    mime_type[0],
+			Path:        uniqueName,
+			FolderId:    folder_id,
+			AccessLevel: access_level,
 		}
 
 		userData, res := jwt_token.GetJsonJwt(r)
